@@ -17,6 +17,8 @@ export function loadTiles(configPath) {
     if (!t || typeof t.path !== 'string' || !t.path) {
       throw new Error(`config: tile ${i} missing path`);
     }
-    return { label: t.label || t.path, path: t.path, icon: t.icon || '📁' };
+    const tile = { label: t.label || t.path, path: t.path, icon: t.icon || '📁' };
+    if (typeof t.command === 'string' && t.command) tile.command = t.command;
+    return tile;
   });
 }

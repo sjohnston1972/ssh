@@ -1,5 +1,5 @@
 {
   "tiles": [
-    { "label": "Crucible", "path": "C:\\cloudflare_projects\\crucible", "icon": "🔥" }
+    { "label": "Crucible", "path": "C:\\cloudflare_projects\\crucible", "icon": "🔥", "command": "claude --dangerously-skip-permissions" }
   ]
 }

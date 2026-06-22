@@ -81,6 +81,16 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
         audit.event('session_start', { email, path: msg.tilePath });
         term.onData((d) => { try { ws.send(JSON.stringify({ type: 'data', data: d })); } catch {} });
         term.onExit(() => { try { ws.send(JSON.stringify({ type: 'exit' })); } catch {} });
+        // Auto-run a tile's configured startup command (typed + Enter) once the shell is ready.
+        const tile = tiles.find((t) => t.path === msg.tilePath && t.command);
+        if (tile) {
+          const startupTimer = setTimeout(() => {
+            if (session.term !== term) return; // session replaced/closed before timer fired
+            try { term.write(tile.command + '\r'); } catch {}
+            audit.command(email, tile.command);
+          }, 500);
+          startupTimer.unref?.();
+        }
       } else if (msg.type === 'input' && session.term) {
         for (const ch of msg.data) {
           if (ch === '\r' || ch === '\n') {

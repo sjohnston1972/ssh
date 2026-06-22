@@ -52,3 +52,28 @@ test('WS runs a command and streams output', async () => {
   assert.match(out, /WSPONG/);
   await close();
 });
+
+test('auto-runs a tile startup command on session start (no client input)', async () => {
+  const audited = [];
+  const audit = { event() {}, command(email, line) { audited.push(line); } };
+  const tiles = [{ label: 'Auto', path: process.cwd(), icon: '📁', command: 'echo AUTORUN123' }];
+  const { server, close } = createServer({
+    tiles, verifier: async () => ({ email: 'a@b.com' }), audit, fallbackDir: process.cwd(), idleMinutes: 60,
+  });
+  const port = await new Promise((res) => server.listen(0, '127.0.0.1', () => res(server.address().port)));
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { 'cf-access-jwt-assertion': 'x' } });
+  const out = await new Promise((resolve, reject) => {
+    let buf = '';
+    ws.on('open', () => { ws.send(JSON.stringify({ type: 'start', tilePath: process.cwd() })); });
+    ws.on('message', (m) => {
+      const msg = JSON.parse(m);
+      if (msg.type === 'data') { buf += msg.data; if (buf.includes('AUTORUN123')) resolve(buf); }
+    });
+    ws.on('error', reject);
+    setTimeout(() => resolve(buf), 5000);
+  });
+  ws.close();
+  assert.match(out, /AUTORUN123/);                 // command ran with no client input
+  assert.ok(audited.includes('echo AUTORUN123'));  // and was audited
+  await close();
+});

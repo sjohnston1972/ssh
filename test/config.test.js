@@ -35,6 +35,16 @@ test('throws when a tile is missing path', () => {
   assert.throws(() => loadTiles(p), /missing path/);
 });
 
+test('passes through optional command and omits it when absent', () => {
+  const p = tmpConfig({ tiles: [
+    { path: 'C:\\a', command: 'claude --dangerously-skip-permissions' },
+    { path: 'C:\\b' },
+  ] });
+  const tiles = loadTiles(p);
+  assert.equal(tiles[0].command, 'claude --dangerously-skip-permissions');
+  assert.ok(!('command' in tiles[1]));
+});
+
 test('cleanup temp directories', () => {
   for (const dir of createdDirs) {
     rmSync(dir, { recursive: true, force: true });
