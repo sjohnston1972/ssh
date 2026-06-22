@@ -35,7 +35,16 @@ test('missing token rejects', async () => {
 test('wrong audience rejects', async () => {
   const { jwks, sign } = await setup();
   const token = await sign({ email: 'x' });
-  await assert.rejects(() => verifyAccessJwt(token, { jwks, issuer: ISS, audience: 'other' }));
+  await assert.rejects(() => verifyAccessJwt(token, { jwks, issuer: ISS, audience: 'other' }), /aud/i);
+});
+
+test('wrong issuer rejects', async () => {
+  const { jwks, sign } = await setup();
+  const token = await sign({ email: 'x' });
+  await assert.rejects(
+    () => verifyAccessJwt(token, { jwks, issuer: 'https://evil.example.com', audience: AUD }),
+    /iss/i
+  );
 });
 
 test('expired token rejects', async () => {
