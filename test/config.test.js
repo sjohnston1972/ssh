@@ -72,6 +72,13 @@ test('rejects allow array containing non-strings', () => {
   assert.throws(() => loadTiles(bad), /allow must be an array/);
 });
 
+test('passes through optional group', () => {
+  const p = tmpConfig({ tiles: [{ path: 'C:\\a', group: 'Work' }, { path: 'C:\\b' }] });
+  const tiles = loadTiles(p);
+  assert.equal(tiles[0].group, 'Work');
+  assert.ok(!('group' in tiles[1]));
+});
+
 test('cleanup temp directories', () => {
   for (const dir of createdDirs) {
     rmSync(dir, { recursive: true, force: true });
