@@ -8,9 +8,10 @@ async function load() {
   for (const t of tiles) {
     const el = document.createElement('div');
     el.className = 'tile';
-    el.innerHTML = `<div class="icon">${t.icon}</div>
-      <div class="label">${t.label}</div>
-      <div class="path">${t.path}</div>`;
+    const icon = document.createElement('div'); icon.className = 'icon'; icon.textContent = t.icon;
+    const label = document.createElement('div'); label.className = 'label'; label.textContent = t.label;
+    const path = document.createElement('div'); path.className = 'path'; path.textContent = t.path;
+    el.append(icon, label, path);
     el.onclick = () => { location.href = `/terminal?path=${encodeURIComponent(t.path)}&label=${encodeURIComponent(t.label)}`; };
     grid.appendChild(el);
   }
