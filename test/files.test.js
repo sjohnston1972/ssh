@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { resolve, sep } from 'node:path';
 import { resolveTileDir, safeChildPath } from '../src/files.js';
 
+const NUL = String.fromCharCode(0);
+
 const tiles = [
   { label: 'Open', path: 'C:\\open' },
   { label: 'Boss', path: 'C:\\boss', allow: ['boss@x'] },
@@ -22,6 +24,7 @@ test('safeChildPath keeps inside dir, strips traversal', () => {
   assert.equal(safeChildPath('C:\\d', 'a/b/c.txt'), resolve('C:\\d', 'c.txt'));
   assert.equal(safeChildPath('C:\\d', '..'), null);
   assert.equal(safeChildPath('C:\\d', ''), null);
+  assert.equal(safeChildPath('C:\\d', 'a' + NUL + 'b.txt'), null);  // null byte rejected
 });
 test('safeChildPath can never escape dir for absolute/drive-relative names', () => {
   const dir = resolve('C:\\d');

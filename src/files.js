@@ -8,7 +8,9 @@ export function resolveTileDir(tiles, path, email) {
 }
 
 export function safeChildPath(dir, name) {
-  const base = basename(String(name || ''));
+  const raw = String(name || '');
+  if (raw.includes('\0')) return null;
+  const base = basename(raw);
   if (!base || base === '.' || base === '..') return null;
   const target = resolve(dir, base);
   const rel = relative(dir, target);

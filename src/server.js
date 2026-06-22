@@ -83,7 +83,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       if (!target || !existsSync(target) || statSync(target).isDirectory()) { res.writeHead(404); return res.end('not found'); }
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${basename(target)}"` });
       audit.event('file_download', { email: identity, path: dir, name: basename(target) });
-      return createReadStream(target).pipe(res);
+      return createReadStream(target).on('error', () => { try { res.destroy(); } catch {} }).pipe(res);
     }
     if (url.pathname === '/api/upload' && req.method === 'PUT') {
       const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
