@@ -8,6 +8,7 @@ import { makeJwks, verifyAccessJwt, extractToken } from './auth.js';
 import { spawnCmd } from './pty-session.js';
 import { createAuditLogger } from './audit.js';
 import { createSessionManager } from './session-manager.js';
+import { visibleTiles, tileAllowed } from './authz.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -18,6 +19,13 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
   async function authed(req) {
     const token = extractToken(req.headers, req.headers.cookie || '');
     return verifier(token); // throws if invalid
+  }
+
+  function securityHeaders(res) {
+    res.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'");
+    res.setHeader('x-content-type-options', 'nosniff');
+    res.setHeader('referrer-policy', 'no-referrer');
+    res.setHeader('x-frame-options', 'DENY');
   }
 
   function serveStatic(res, fileRel) {
@@ -35,12 +43,14 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
     try { payload = await authed(req); }
     catch { res.writeHead(403); return res.end('forbidden'); }
 
+    securityHeaders(res);
+
     const url = new URL(req.url, 'http://x');
     if (url.pathname === '/' ) return serveStatic(res, 'index.html');
     if (url.pathname === '/terminal') return serveStatic(res, 'terminal.html');
     if (url.pathname === '/api/tiles') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify(tiles));
+      return res.end(JSON.stringify(visibleTiles(tiles, payload.email || payload.sub || 'unknown')));
     }
     if (url.pathname === '/api/me') {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -78,9 +88,14 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       let msg; try { msg = JSON.parse(raw); } catch { return; }
       if (msg.type === 'start') {
         const tile = tiles.find((t) => t.path === msg.tilePath);
+        if (!tile || !tileAllowed(tile, identity)) {
+          try { ws.send(JSON.stringify({ type: 'error', message: 'Not authorized for this tile' })); } catch {}
+          audit.event('start_denied', { email: identity, path: msg.tilePath });
+          return;
+        }
         manager.start(identity, ws, {
           tilePath: msg.tilePath, cols: msg.cols, rows: msg.rows,
-          shell: tile?.shell, command: tile?.command,
+          shell: tile.shell, command: tile.command,
         });
       } else if (msg.type === 'input') {
         manager.input(identity, msg.data);
