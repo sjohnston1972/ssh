@@ -1,21 +1,22 @@
 import http from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, extname, dirname, resolve, relative } from 'node:path';
+import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, createReadStream } from 'node:fs';
+import { join, extname, dirname, resolve, relative, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { loadTiles } from './config.js';
 import { makeJwks, verifyAccessJwt, extractToken } from './auth.js';
 import { spawnCmd } from './pty-session.js';
-import { createAuditLogger } from './audit.js';
+import { createAuditLogger, readRecentAudit, pruneOldLogs } from './audit.js';
 import { createSessionManager } from './session-manager.js';
 import { visibleTiles, tileAllowed } from './authz.js';
+import { resolveTileDir, safeChildPath } from './files.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
 const PUBLIC = join(ROOT, 'public');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
-export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes, graceMinutes = 10, bufferBytes = 262144 }) {
+export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes, graceMinutes = 10, bufferBytes = 262144, logsDir = join(ROOT, 'logs'), maxUploadBytes = 100 * 1024 * 1024 }) {
   async function authed(req) {
     const token = extractToken(req.headers, req.headers.cookie || '');
     return verifier(token); // throws if invalid
@@ -44,17 +45,68 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
     catch { res.writeHead(403); return res.end('forbidden'); }
 
     securityHeaders(res);
-
+    const identity = payload.email || payload.sub || 'unknown';
     const url = new URL(req.url, 'http://x');
+
     if (url.pathname === '/' ) return serveStatic(res, 'index.html');
     if (url.pathname === '/terminal') return serveStatic(res, 'terminal.html');
+    if (url.pathname === '/audit') return serveStatic(res, 'audit.html');
     if (url.pathname === '/api/tiles') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify(visibleTiles(tiles, payload.email || payload.sub || 'unknown')));
+      return res.end(JSON.stringify(visibleTiles(tiles, identity)));
     }
     if (url.pathname === '/api/me') {
       res.writeHead(200, { 'content-type': 'application/json' });
-      return res.end(JSON.stringify({ email: payload.email || payload.sub || 'unknown' }));
+      return res.end(JSON.stringify({ email: identity }));
+    }
+    if (url.pathname === '/api/audit') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(readRecentAudit(logsDir, Number(url.searchParams.get('limit')) || 500)));
+    }
+    if (url.pathname === '/api/files') {
+      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      if (!dir) { res.writeHead(403); return res.end('forbidden'); }
+      let entries = [];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true }).map((d) => {
+          let size = 0, mtime = 0; try { const st = statSync(join(dir, d.name)); size = st.size; mtime = st.mtimeMs; } catch {}
+          return { name: d.name, size, isDir: d.isDirectory(), mtime };
+        });
+      } catch {}
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify(entries));
+    }
+    if (url.pathname === '/api/download') {
+      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      if (!dir) { res.writeHead(403); return res.end('forbidden'); }
+      const target = safeChildPath(dir, url.searchParams.get('file'));
+      if (!target || !existsSync(target) || statSync(target).isDirectory()) { res.writeHead(404); return res.end('not found'); }
+      res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${basename(target)}"` });
+      audit.event('file_download', { email: identity, path: dir, name: basename(target) });
+      return createReadStream(target).pipe(res);
+    }
+    if (url.pathname === '/api/upload' && req.method === 'PUT') {
+      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      if (!dir) { res.writeHead(403); return res.end('forbidden'); }
+      const target = safeChildPath(dir, url.searchParams.get('name'));
+      if (!target) { res.writeHead(400); return res.end('bad name'); }
+      const chunks = []; let size = 0; let aborted = false;
+      req.on('data', (c) => {
+        if (aborted) return;
+        size += c.length;
+        if (size > maxUploadBytes) { aborted = true; res.writeHead(413); res.end('too large'); req.destroy(); return; }
+        chunks.push(c);
+      });
+      req.on('end', () => {
+        if (aborted) return;
+        try {
+          writeFileSync(target, Buffer.concat(chunks));
+          audit.event('file_upload', { email: identity, path: dir, name: basename(target), size });
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, name: basename(target), size }));
+        } catch { res.writeHead(500); res.end('write failed'); }
+      });
+      return;
     }
     if (url.pathname.startsWith('/vendor/')) return serveStatic(res, url.pathname.slice(1));
     if (url.pathname.endsWith('.js') || url.pathname.endsWith('.css'))
@@ -128,7 +180,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const jwks = makeJwks(env.ACCESS_TEAM_DOMAIN);
   const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
   const audience = env.ACCESS_AUD;
-  const audit = createAuditLogger(join(ROOT, 'logs'));
+  const logsDir = join(ROOT, 'logs');
+  const audit = createAuditLogger(logsDir);
+  pruneOldLogs(logsDir, Number(env.AUDIT_RETENTION_DAYS || 30));
   if (!env.ACCESS_TEAM_DOMAIN || !audience) {
     console.error('FATAL: ACCESS_TEAM_DOMAIN and ACCESS_AUD must be set in .env (refusing to start without enforced JWT audience/issuer).');
     process.exit(1);
@@ -139,6 +193,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     idleMinutes: Number(env.SESSION_IDLE_MINUTES || 15),
     graceMinutes: Number(env.SESSION_GRACE_MINUTES || 10),
     bufferBytes: Number(env.SESSION_BUFFER_BYTES || 262144),
+    logsDir,
   });
   const port = Number(env.PORT || 7900);
   const bind = env.BIND || '0.0.0.0';

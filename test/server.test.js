@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer } from '../src/server.js';
 import { tileAllowed } from '../src/authz.js';   // add near top imports (used indirectly; keeps import graph honest)
 
@@ -116,5 +119,60 @@ test('security headers present on responses', async () => {
   assert.match(r.headers.get('content-security-policy') || '', /default-src 'self'/);
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  await close();
+});
+
+test('file upload → list → download round-trip for an allowed tile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  const h = { 'cf-access-jwt-assertion': 'a@x' };
+  // upload
+  const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=hello.txt`, { method: 'PUT', headers: h, body: 'HELLO-SP4' });
+  assert.equal(up.status, 200);
+  assert.ok(existsSync(join(dir, 'hello.txt')));
+  // list
+  const list = await (await fetch(`http://127.0.0.1:${port}/api/files?path=${encodeURIComponent(dir)}`, { headers: h })).json();
+  assert.ok(list.find((e) => e.name === 'hello.txt'));
+  // download
+  const dl = await fetch(`http://127.0.0.1:${port}/api/download?path=${encodeURIComponent(dir)}&file=hello.txt`, { headers: h });
+  assert.equal(await dl.text(), 'HELLO-SP4');
+  await close();
+});
+
+test('upload to a disallowed tile is 403', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile2-'));
+  const tiles = [{ label: 'Boss', path: dir, icon: '🔒', allow: ['boss@x'] }];
+  const { port, close } = await start({ tiles });
+  const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=x.txt`, { method: 'PUT', headers: { 'cf-access-jwt-assertion': 'peon@x' }, body: 'no' });
+  assert.equal(up.status, 403);
+  assert.ok(!existsSync(join(dir, 'x.txt')));
+  await close();
+});
+
+test('download with traversal name is contained (not found)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile3-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  const r = await fetch(`http://127.0.0.1:${port}/api/download?path=${encodeURIComponent(dir)}&file=${encodeURIComponent('..\\\\..\\\\secret')}`, { headers: { 'cf-access-jwt-assertion': 'a@x' } });
+  assert.ok(r.status === 404 || r.status === 400);
+  await close();
+});
+
+test('/api/audit returns a JSON array', async () => {
+  const logsDir = mkdtempSync(join(tmpdir(), 'logs-'));
+  writeFileSync(join(logsDir, 'audit-2024-01-01.log'), JSON.stringify({ ts: 'a', type: 'session_start', email: 'a@x' }) + '\n');
+  const { port, close } = await start({ server: { logsDir } });
+  const rows = await (await fetch(`http://127.0.0.1:${port}/api/audit`, { headers: { 'cf-access-jwt-assertion': 'a@x' } })).json();
+  assert.ok(Array.isArray(rows) && rows[0].type === 'session_start');
+  await close();
+});
+
+test('oversize upload is rejected (413)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile4-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles, server: { maxUploadBytes: 8 } });
+  const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=big.txt`, { method: 'PUT', headers: { 'cf-access-jwt-assertion': 'a@x' }, body: 'way too long body' });
+  assert.equal(up.status, 413);
   await close();
 });
