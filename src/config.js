@@ -1,7 +1,15 @@
 import { readFileSync } from 'node:fs';
 
-export function loadTiles(path) {
-  const raw = JSON.parse(readFileSync(path, 'utf8'));
+export function loadTiles(configPath) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error('config: invalid JSON in ' + configPath + ': ' + err.message);
+    }
+    throw new Error('config: cannot read ' + configPath + ': ' + err.message);
+  }
   if (!Array.isArray(raw.tiles)) {
     throw new Error('config: tiles must be an array');
   }
