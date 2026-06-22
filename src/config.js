@@ -19,6 +19,7 @@ export function loadTiles(configPath) {
     }
     const tile = { label: t.label || t.path, path: t.path, icon: t.icon || '📁' };
     if (typeof t.command === 'string' && t.command) tile.command = t.command;
+    if (typeof t.shell === 'string' && t.shell) tile.shell = t.shell;
     if (t.intro && typeof t.intro === 'object') tile.intro = t.intro;
     return tile;
   });

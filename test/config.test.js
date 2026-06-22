@@ -45,6 +45,13 @@ test('passes through optional command and omits it when absent', () => {
   assert.ok(!('command' in tiles[1]));
 });
 
+test('passes through optional shell and omits it when absent', () => {
+  const p = tmpConfig({ tiles: [{ path: 'C:\\a', shell: 'powershell.exe' }, { path: 'C:\\b' }] });
+  const tiles = loadTiles(p);
+  assert.equal(tiles[0].shell, 'powershell.exe');
+  assert.ok(!('shell' in tiles[1]));
+});
+
 test('passes through optional intro object', () => {
   const intro = { title: 'Hi', lines: ['one', 'two'] };
   const p = tmpConfig({ tiles: [{ path: 'C:\\a', intro }, { path: 'C:\\b' }] });
