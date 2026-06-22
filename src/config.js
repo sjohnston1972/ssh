@@ -21,6 +21,12 @@ export function loadTiles(configPath) {
     if (typeof t.command === 'string' && t.command) tile.command = t.command;
     if (typeof t.shell === 'string' && t.shell) tile.shell = t.shell;
     if (t.intro && typeof t.intro === 'object') tile.intro = t.intro;
+    if (t.allow !== undefined) {
+      if (!Array.isArray(t.allow) || t.allow.some((a) => typeof a !== 'string')) {
+        throw new Error(`config: tile ${i} allow must be an array of strings`);
+      }
+      tile.allow = t.allow;
+    }
     return tile;
   });
 }

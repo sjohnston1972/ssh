@@ -60,6 +60,13 @@ test('passes through optional intro object', () => {
   assert.ok(!('intro' in tiles[1]));
 });
 
+test('passes through allow array and rejects malformed allow', () => {
+  const p = tmpConfig({ tiles: [{ path: 'C:\\a', allow: ['x@y'] }] });
+  assert.deepEqual(loadTiles(p)[0].allow, ['x@y']);
+  const bad = tmpConfig({ tiles: [{ path: 'C:\\a', allow: 'nope' }] });
+  assert.throws(() => loadTiles(bad), /allow must be an array/);
+});
+
 test('cleanup temp directories', () => {
   for (const dir of createdDirs) {
     rmSync(dir, { recursive: true, force: true });
