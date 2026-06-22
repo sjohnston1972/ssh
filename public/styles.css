@@ -34,3 +34,14 @@ header .who { color:var(--muted); font-size:13px; }
 .btn-secondary:hover { border-color:var(--accent); }
 @keyframes modal-fade { from { opacity:0; } to { opacity:1; } }
 @keyframes modal-pop { from { transform:translateY(8px) scale(.98); opacity:0; } to { transform:none; opacity:1; } }
+
+/* Connection status */
+.status { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid #2a3445; }
+.status[data-state="connected"]    { color:#34d399; border-color:#1f6f53; }
+.status[data-state="connecting"],
+.status[data-state="reconnecting"] { color:#fbbf24; border-color:#7a5a12; }
+.status[data-state="disconnected"] { color:#f87171; border-color:#7a2222; }
+.status-btn { font:inherit; font-size:12px; padding:4px 12px; border-radius:8px; border:1px solid var(--accent);
+  background:transparent; color:var(--accent); cursor:pointer; }
+.status-btn:hover { background:var(--accent); color:#fff; }
+#idle-banner { background:#7a5a12; color:#fff; font-size:13px; padding:8px 24px; text-align:center; }
