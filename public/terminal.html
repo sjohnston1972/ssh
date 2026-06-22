@@ -4,21 +4,44 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>terminal · clydeford</title>
-  <link rel="stylesheet" href="/styles.css?v=4" />
+  <link rel="stylesheet" href="/styles.css?v=5" />
   <link rel="stylesheet" href="/vendor/xterm.css" />
 </head>
 <body>
   <div class="term-header">
     <a href="/">← tiles</a>
     <span class="path" id="path"></span>
+    <span class="spacer"></span>
+    <button id="btn-search" class="ctl" title="Search (Ctrl+F)">🔍</button>
+    <button id="btn-font-dec" class="ctl" title="Smaller">A−</button>
+    <button id="btn-font-inc" class="ctl" title="Larger">A+</button>
+    <button id="btn-theme" class="ctl" title="Toggle theme">◐</button>
+    <button id="btn-fullscreen" class="ctl" title="Fullscreen">⛶</button>
     <span class="status" id="status" data-state="connecting">connecting…</span>
     <button id="reconnect" class="status-btn" hidden>Reconnect</button>
     <a href="#" id="restart">restart</a>
   </div>
+  <div id="search-bar" hidden>
+    <input id="search-input" type="text" placeholder="find…" />
+    <button id="search-prev" class="ctl" title="Previous">▲</button>
+    <button id="search-next" class="ctl" title="Next">▼</button>
+    <button id="search-close" class="ctl" title="Close (Esc)">✕</button>
+  </div>
   <div id="idle-banner" hidden></div>
   <div id="terminal-host"></div>
+  <div id="mobile-keys">
+    <button data-key="esc">Esc</button>
+    <button data-key="tab">Tab</button>
+    <button data-key="up">↑</button>
+    <button data-key="down">↓</button>
+    <button data-key="left">←</button>
+    <button data-key="right">→</button>
+    <button data-key="ctrl-c">^C</button>
+  </div>
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/addon-fit.js"></script>
-  <script src="/terminal.js?v=4"></script>
+  <script src="/vendor/addon-web-links.js"></script>
+  <script src="/vendor/addon-search.js"></script>
+  <script src="/terminal.js?v=5"></script>
 </body>
 </html>

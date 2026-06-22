@@ -45,3 +45,24 @@ header .who { color:var(--muted); font-size:13px; }
   background:transparent; color:var(--accent); cursor:pointer; }
 .status-btn:hover { background:var(--accent); color:#fff; }
 #idle-banner { background:#7a5a12; color:#fff; font-size:13px; padding:8px 24px; text-align:center; }
+
+/* SP3 terminal controls */
+.term-header .spacer { flex: 1; }
+.ctl { font:inherit; font-size:13px; padding:4px 9px; border-radius:7px; border:1px solid #2a3445;
+  background:transparent; color:var(--text); cursor:pointer; }
+.ctl:hover { border-color:var(--accent); color:var(--accent); }
+#search-bar { display:flex; gap:6px; align-items:center; padding:8px 16px; background:#0f1623; border-bottom:1px solid #1f2937; }
+#search-input { flex:0 0 240px; font:inherit; font-size:13px; padding:6px 10px; border-radius:7px;
+  border:1px solid #2a3445; background:#0b0f17; color:var(--text); }
+#mobile-keys { display:none; gap:6px; padding:8px; background:#0f1623; border-top:1px solid #1f2937; overflow-x:auto; }
+#mobile-keys button { flex:0 0 auto; font:inherit; font-size:14px; min-width:44px; padding:10px 12px;
+  border-radius:8px; border:1px solid #2a3445; background:#151b27; color:var(--text); }
+#mobile-keys button:active { background:var(--accent); color:#fff; }
+@media (max-width: 820px) { #mobile-keys { display:flex; } }
+
+/* SP3 dashboard */
+header #tile-search { flex:0 0 280px; font:inherit; font-size:14px; padding:8px 12px; border-radius:9px;
+  border:1px solid #2a3445; background:#0b0f17; color:var(--text); }
+.group-heading { padding:8px 32px 0; margin:18px 0 0; font-size:14px; text-transform:uppercase;
+  letter-spacing:.08em; color:var(--muted); }
+.empty { padding:32px; color:var(--muted); }
