@@ -7,15 +7,14 @@ import { loadTiles } from './config.js';
 import { makeJwks, verifyAccessJwt, extractToken } from './auth.js';
 import { spawnCmd } from './pty-session.js';
 import { createAuditLogger } from './audit.js';
+import { createSessionManager } from './session-manager.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
 const PUBLIC = join(ROOT, 'public');
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 
-export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes }) {
-  let active = null; // { ws, term, email, lastActivity, lineBuf }
-
+export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes, graceMinutes = 10, bufferBytes = 262144 }) {
   async function authed(req) {
     const token = extractToken(req.headers, req.headers.cookie || '');
     return verifier(token); // throws if invalid
@@ -53,6 +52,14 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
     res.writeHead(404); res.end('not found');
   });
 
+  const manager = createSessionManager({
+    spawn: (o) => spawnCmd({ cwd: o.cwd, fallbackDir, cols: o.cols, rows: o.rows, shell: o.shell }),
+    audit,
+    idleMs: (idleMinutes || 15) * 60000,
+    graceMs: (graceMinutes || 10) * 60000,
+    bufferBytes,
+  });
+
   const wss = new WebSocketServer({ noServer: true });
 
   server.on('upgrade', async (req, socket, head) => {
@@ -64,70 +71,38 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
   });
 
   function onConnect(ws, payload) {
-    const email = payload.email || payload.sub || 'unknown';
-    // Single-session: take over.
-    if (active) {
-      try { active.ws.send(JSON.stringify({ type: 'error', message: 'Session taken over by a new connection.' })); } catch {}
-      try { active.term?.kill(); } catch {}
-      try { active.ws.close(); } catch {}
-    }
-    const session = { ws, term: null, email, lastActivity: Date.now(), lineBuf: '' };
-    active = session;
-
+    const identity = payload.email || payload.sub || 'unknown';
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (raw) => {
       let msg; try { msg = JSON.parse(raw); } catch { return; }
-      session.lastActivity = Date.now();
       if (msg.type === 'start') {
-        if (session.term) return;
         const tile = tiles.find((t) => t.path === msg.tilePath);
-        const term = spawnCmd({ cwd: msg.tilePath, fallbackDir, cols: msg.cols || 120, rows: msg.rows || 30, shell: tile?.shell });
-        session.term = term;
-        audit.event('session_start', { email, path: msg.tilePath });
-        term.onData((d) => { try { ws.send(JSON.stringify({ type: 'data', data: d })); } catch {} });
-        term.onExit(() => { try { ws.send(JSON.stringify({ type: 'exit' })); } catch {} });
-        // Auto-run a tile's configured startup command (typed + Enter) once the shell is ready.
-        if (tile?.command) {
-          const startupTimer = setTimeout(() => {
-            if (session.term !== term) return; // session replaced/closed before timer fired
-            try { term.write(tile.command + '\r'); } catch {}
-            audit.command(email, tile.command);
-          }, 500);
-          startupTimer.unref?.();
-        }
-      } else if (msg.type === 'input' && session.term) {
-        for (const ch of msg.data) {
-          if (ch === '\r' || ch === '\n') {
-            if (session.lineBuf.trim()) audit.command(email, session.lineBuf);
-            session.lineBuf = '';
-          } else if (ch === '') { session.lineBuf = session.lineBuf.slice(0, -1); }
-          else { session.lineBuf += ch; }
-        }
-        session.term.write(msg.data);
-      } else if (msg.type === 'resize' && session.term) {
-        try { session.term.resize(msg.cols, msg.rows); } catch {}
+        manager.start(identity, ws, {
+          tilePath: msg.tilePath, cols: msg.cols, rows: msg.rows,
+          shell: tile?.shell, command: tile?.command,
+        });
+      } else if (msg.type === 'input') {
+        manager.input(identity, msg.data);
+      } else if (msg.type === 'resize') {
+        manager.resize(identity, msg.cols, msg.rows);
       }
     });
-
-    ws.on('close', () => {
-      if (session.term) { try { session.term.kill(); } catch {} }
-      audit.event('session_stop', { email });
-      if (active === session) active = null;
-    });
+    ws.on('close', () => manager.detach(identity, ws));
   }
 
-  const idleMs = (idleMinutes || 15) * 60 * 1000;
-  const idleTimer = setInterval(() => {
-    if (active && Date.now() - active.lastActivity > idleMs) {
-      try { active.ws.send(JSON.stringify({ type: 'error', message: 'Idle timeout.' })); } catch {}
-      try { active.term?.kill(); } catch {}
-      try { active.ws.close(); } catch {}
+  // Heartbeat: terminate half-open sockets so the grace flow kicks in.
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { try { ws.terminate(); } catch {} continue; }
+      ws.isAlive = false; try { ws.ping(); } catch {}
     }
   }, 30000);
-  idleTimer.unref?.();
+  heartbeat.unref?.();
 
   return {
     server,
-    close: () => new Promise((res) => { clearInterval(idleTimer); wss.close(); server.close(res); }),
+    close: () => new Promise((res) => { clearInterval(heartbeat); manager.shutdown(); wss.close(); server.close(res); }),
   };
 }
 
