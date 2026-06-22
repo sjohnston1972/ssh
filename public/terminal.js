@@ -81,7 +81,7 @@ term.attachCustomKeyEventHandler((e) => {
   if (e.ctrlKey && key === 'c' && (e.shiftKey || term.hasSelection())) {
     const sel = term.getSelection();
     if (sel) { navigator.clipboard?.writeText(sel).catch(() => {}); return false; }
-    if (e.shiftKey) return false;
+    // no selection: let the key pass through (Ctrl+C interrupts; Ctrl+Shift+C reaches the browser, e.g. DevTools)
   }
   if (e.ctrlKey && key === 'v') {
     navigator.clipboard?.readText().then((t) => { if (t) sendInput(t); }).catch(() => {});
