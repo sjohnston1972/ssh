@@ -66,3 +66,20 @@ header #tile-search { flex:0 0 280px; font:inherit; font-size:14px; padding:8px 
 .group-heading { padding:8px 32px 0; margin:18px 0 0; font-size:14px; text-transform:uppercase;
   letter-spacing:.08em; color:var(--muted); }
 .empty { padding:32px; color:var(--muted); }
+
+/* SP4 files panel */
+#files-panel { background:#0f1623; border-bottom:1px solid #1f2937; max-height:40vh; overflow:auto; }
+.files-head { display:flex; gap:10px; align-items:center; padding:10px 16px; }
+#files-list { list-style:none; margin:0; padding:0 16px 12px; }
+#files-list li { display:flex; align-items:center; gap:12px; padding:6px 0; border-top:1px solid #18202e; }
+#files-list .fname { flex:1; font-family:Consolas,monospace; font-size:13px; }
+#files-list .fmeta { color:var(--muted); font-size:12px; }
+#files-list a.ctl { text-decoration:none; }
+#files-list .empty { color:var(--muted); }
+
+/* SP4 audit table */
+#audit-table { width:100%; border-collapse:collapse; font-size:13px; }
+#audit-table th, #audit-table td { text-align:left; padding:8px 12px; border-bottom:1px solid #1f2937; vertical-align:top; }
+#audit-table th { color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:.06em; }
+#audit-table td:nth-child(4) { font-family:Consolas,monospace; word-break:break-all; }
+main { padding:16px 24px; }

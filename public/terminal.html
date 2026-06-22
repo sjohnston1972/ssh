@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>terminal · clydeford</title>
-  <link rel="stylesheet" href="/styles.css?v=5" />
+  <link rel="stylesheet" href="/styles.css?v=6" />
   <link rel="stylesheet" href="/vendor/xterm.css" />
 </head>
 <body>
@@ -17,6 +17,7 @@
     <button id="btn-font-inc" class="ctl" title="Larger">A+</button>
     <button id="btn-theme" class="ctl" title="Toggle theme">◐</button>
     <button id="btn-fullscreen" class="ctl" title="Fullscreen">⛶</button>
+    <button id="btn-files" class="ctl" title="Files">📁</button>
     <span class="status" id="status" data-state="connecting">connecting…</span>
     <button id="reconnect" class="status-btn" hidden>Reconnect</button>
     <a href="#" id="restart">restart</a>
@@ -26,6 +27,15 @@
     <button id="search-prev" class="ctl" title="Previous">▲</button>
     <button id="search-next" class="ctl" title="Next">▼</button>
     <button id="search-close" class="ctl" title="Close (Esc)">✕</button>
+  </div>
+  <div id="files-panel" hidden>
+    <div class="files-head">
+      <strong>Files</strong>
+      <label class="ctl" style="cursor:pointer">⬆ Upload<input id="file-input" type="file" multiple hidden /></label>
+      <button id="files-refresh" class="ctl">↻</button>
+      <button id="files-close" class="ctl">✕</button>
+    </div>
+    <ul id="files-list"></ul>
   </div>
   <div id="idle-banner" hidden></div>
   <div id="terminal-host"></div>
@@ -42,6 +52,6 @@
   <script src="/vendor/addon-fit.js"></script>
   <script src="/vendor/addon-web-links.js"></script>
   <script src="/vendor/addon-search.js"></script>
-  <script src="/terminal.js?v=5"></script>
+  <script src="/terminal.js?v=6"></script>
 </body>
 </html>

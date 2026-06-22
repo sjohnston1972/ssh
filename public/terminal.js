@@ -127,3 +127,38 @@ window.addEventListener('load', syncSize);
 document.addEventListener('fullscreenchange', syncSize);
 reconnectBtn.onclick = () => location.reload();
 document.getElementById('restart').onclick = (e) => { e.preventDefault(); location.reload(); };
+
+// --- SP4: files panel ---
+const filesPanel = document.getElementById('files-panel');
+const filesList = document.getElementById('files-list');
+const fileInput = document.getElementById('file-input');
+function fmtSize(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : n > 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B'; }
+async function loadFiles() {
+  filesList.textContent = '';
+  let entries = [];
+  try { entries = await (await fetch('/api/files?path=' + encodeURIComponent(tilePath))).json(); } catch {}
+  entries.sort((a, b) => Number(b.isDir) - Number(a.isDir) || a.name.localeCompare(b.name));
+  for (const e of entries) {
+    const li = document.createElement('li');
+    const name = document.createElement('span'); name.className = 'fname'; name.textContent = (e.isDir ? '📂 ' : '📄 ') + e.name;
+    li.appendChild(name);
+    if (!e.isDir) {
+      const meta = document.createElement('span'); meta.className = 'fmeta'; meta.textContent = fmtSize(e.size);
+      const dl = document.createElement('a'); dl.className = 'ctl'; dl.textContent = '⬇';
+      dl.href = '/api/download?path=' + encodeURIComponent(tilePath) + '&file=' + encodeURIComponent(e.name);
+      li.append(meta, dl);
+    }
+    filesList.appendChild(li);
+  }
+  if (!entries.length) { const li = document.createElement('li'); li.className = 'empty'; li.textContent = '(empty)'; filesList.appendChild(li); }
+}
+document.getElementById('btn-files').onclick = () => { filesPanel.hidden = !filesPanel.hidden; if (!filesPanel.hidden) loadFiles(); };
+document.getElementById('files-close').onclick = () => { filesPanel.hidden = true; };
+document.getElementById('files-refresh').onclick = loadFiles;
+fileInput.onchange = async () => {
+  for (const f of fileInput.files) {
+    try { await fetch('/api/upload?path=' + encodeURIComponent(tilePath) + '&name=' + encodeURIComponent(f.name), { method: 'PUT', body: f }); } catch {}
+  }
+  fileInput.value = '';
+  loadFiles();
+};
