@@ -19,3 +19,8 @@ test('visibleTiles filters per identity', () => {
   assert.deepEqual(visibleTiles(tiles, 'boss@x').map((t) => t.path), ['a', 'b']);
   assert.deepEqual(visibleTiles(tiles, 'nobody@x').map((t) => t.path), ['a']);
 });
+test('null/undefined email never matches a restricted tile', () => {
+  const t = { path: 'x', allow: ['a@b'] };
+  assert.equal(tileAllowed(t, null), false);
+  assert.equal(tileAllowed(t, undefined), false);
+});

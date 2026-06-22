@@ -67,6 +67,11 @@ test('passes through allow array and rejects malformed allow', () => {
   assert.throws(() => loadTiles(bad), /allow must be an array/);
 });
 
+test('rejects allow array containing non-strings', () => {
+  const bad = tmpConfig({ tiles: [{ path: 'C:\\a', allow: [1, 'ok'] }] });
+  assert.throws(() => loadTiles(bad), /allow must be an array/);
+});
+
 test('cleanup temp directories', () => {
   for (const dir of createdDirs) {
     rmSync(dir, { recursive: true, force: true });
