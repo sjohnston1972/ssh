@@ -24,7 +24,10 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
   function serveStatic(res, fileRel) {
     const file = resolve(PUBLIC, fileRel);
     if (relative(PUBLIC, file).startsWith('..') || !existsSync(file)) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'content-type': MIME[extname(file)] || 'application/octet-stream',
+      'cache-control': 'no-store, must-revalidate',
+    });
     res.end(readFileSync(file));
   }
 
