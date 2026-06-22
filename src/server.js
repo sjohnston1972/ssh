@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFileSync, existsSync } from 'node:fs';
-import { join, extname, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, extname, dirname, resolve, relative } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { loadTiles } from './config.js';
 import { makeJwks, verifyAccessJwt, extractToken } from './auth.js';
@@ -22,8 +22,8 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
   }
 
   function serveStatic(res, fileRel) {
-    const file = join(PUBLIC, fileRel);
-    if (!file.startsWith(PUBLIC) || !existsSync(file)) { res.writeHead(404); return res.end('not found'); }
+    const file = resolve(PUBLIC, fileRel);
+    if (relative(PUBLIC, file).startsWith('..') || !existsSync(file)) { res.writeHead(404); return res.end('not found'); }
     res.writeHead(200, { 'content-type': MIME[extname(file)] || 'application/octet-stream' });
     res.end(readFileSync(file));
   }
@@ -65,7 +65,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
     // Single-session: take over.
     if (active) {
       try { active.ws.send(JSON.stringify({ type: 'error', message: 'Session taken over by a new connection.' })); } catch {}
-      try { active.term.kill(); } catch {}
+      try { active.term?.kill(); } catch {}
       try { active.ws.close(); } catch {}
     }
     const session = { ws, term: null, email, lastActivity: Date.now(), lineBuf: '' };
@@ -80,13 +80,13 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
         session.term = term;
         audit.event('session_start', { email, path: msg.tilePath });
         term.onData((d) => { try { ws.send(JSON.stringify({ type: 'data', data: d })); } catch {} });
-        term.onExit(() => { try { ws.send(JSON.stringify({ type: 'exit' })); } catch {}; });
+        term.onExit(() => { try { ws.send(JSON.stringify({ type: 'exit' })); } catch {} });
       } else if (msg.type === 'input' && session.term) {
         for (const ch of msg.data) {
           if (ch === '\r' || ch === '\n') {
             if (session.lineBuf.trim()) audit.command(email, session.lineBuf);
             session.lineBuf = '';
-          } else if (ch === '') { session.lineBuf = ''; }
+          } else if (ch === '') { session.lineBuf = session.lineBuf.slice(0, -1); }
           else { session.lineBuf += ch; }
         }
         session.term.write(msg.data);
@@ -119,7 +119,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes 
 }
 
 // Entrypoint
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('server.js')) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const env = readEnv(join(ROOT, '.env'));
   const tiles = loadTiles(join(ROOT, 'config.json'));
   const jwks = makeJwks(env.ACCESS_TEAM_DOMAIN);
