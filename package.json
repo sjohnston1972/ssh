@@ -6,7 +6,7 @@
   "scripts": {
     "vendor": "node scripts/copy-vendor.js",
     "start": "node src/server.js",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "wire": "node scripts/wire-cloudflare.js"
   },
   "dependencies": {
