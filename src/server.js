@@ -102,7 +102,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
 
   return {
     server,
-    close: () => new Promise((res) => { clearInterval(heartbeat); manager.shutdown(); wss.close(); server.close(res); }),
+    close: () => new Promise((res) => { clearInterval(heartbeat); manager.shutdown(); wss.close(); server.closeAllConnections?.(); server.close(res); }),
   };
 }
 
@@ -122,6 +122,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const { server } = createServer({
     tiles, verifier, audit, fallbackDir: env.FALLBACK_DIR,
     idleMinutes: Number(env.SESSION_IDLE_MINUTES || 15),
+    graceMinutes: Number(env.SESSION_GRACE_MINUTES || 10),
+    bufferBytes: Number(env.SESSION_BUFFER_BYTES || 262144),
   });
   const port = Number(env.PORT || 7900);
   const bind = env.BIND || '0.0.0.0';
