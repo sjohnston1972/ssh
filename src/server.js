@@ -126,13 +126,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const issuer = `https://${env.ACCESS_TEAM_DOMAIN}`;
   const audience = env.ACCESS_AUD;
   const audit = createAuditLogger(join(ROOT, 'logs'));
+  if (!env.ACCESS_TEAM_DOMAIN || !audience) {
+    console.error('FATAL: ACCESS_TEAM_DOMAIN and ACCESS_AUD must be set in .env (refusing to start without enforced JWT audience/issuer).');
+    process.exit(1);
+  }
   const verifier = (token) => verifyAccessJwt(token, { jwks, issuer, audience });
   const { server } = createServer({
     tiles, verifier, audit, fallbackDir: env.FALLBACK_DIR,
     idleMinutes: Number(env.SESSION_IDLE_MINUTES || 15),
   });
   const port = Number(env.PORT || 7900);
-  server.listen(port, env.BIND || '0.0.0.0', () => console.log(`listening on ${env.BIND}:${port}`));
+  const bind = env.BIND || '0.0.0.0';
+  server.listen(port, bind, () => console.log(`listening on ${bind}:${port}`));
 }
 
 function readEnv(path) {
