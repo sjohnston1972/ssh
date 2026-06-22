@@ -3,3 +3,4 @@ logs/
 public/vendor/
 .env
 *.log
+src/daemon/
