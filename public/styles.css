@@ -15,3 +15,22 @@ header .who { color:var(--muted); font-size:13px; }
 .term-header { padding:14px 24px; border-bottom:1px solid #1f2937; display:flex; gap:16px; align-items:center; }
 .term-header a { color:var(--accent); text-decoration:none; font-size:14px; }
 .term-header .path { color:var(--muted); font-family:Consolas,monospace; font-size:13px; }
+
+/* Intro modal */
+.modal-overlay { position:fixed; inset:0; background:rgba(2,6,15,.65); backdrop-filter:blur(4px);
+  display:flex; align-items:center; justify-content:center; z-index:1000; animation:modal-fade .15s ease; }
+.modal { background:var(--card); border:1px solid #2a3445; border-radius:16px; padding:30px 32px;
+  max-width:540px; width:90%; box-shadow:0 24px 70px rgba(0,0,0,.55); animation:modal-pop .18s ease; }
+.modal-icon { font-size:42px; line-height:1; }
+.modal-title { margin:12px 0 16px; font-size:21px; font-weight:700; }
+.modal-lines { margin:0 0 24px; padding-left:18px; color:var(--muted); line-height:1.65; font-size:14px; }
+.modal-lines li { margin-bottom:10px; }
+.modal-actions { display:flex; justify-content:flex-end; gap:12px; }
+.modal-actions button { font:inherit; font-size:14px; font-weight:600; padding:10px 22px; border-radius:9px;
+  border:1px solid transparent; cursor:pointer; transition:background .12s ease, border-color .12s ease; }
+.btn-primary { background:var(--accent); color:#fff; }
+.btn-primary:hover { background:#2f6fd6; }
+.btn-secondary { background:transparent; border-color:#2a3445; color:var(--text); }
+.btn-secondary:hover { border-color:var(--accent); }
+@keyframes modal-fade { from { opacity:0; } to { opacity:1; } }
+@keyframes modal-pop { from { transform:translateY(8px) scale(.98); opacity:0; } to { transform:none; opacity:1; } }

@@ -1,5 +1,19 @@
 {
   "tiles": [
-    { "label": "Crucible", "path": "C:\\cloudflare_projects\\crucible", "icon": "🔥", "command": "claude --dangerously-skip-permissions" }
+    {
+      "label": "Crucible",
+      "path": "C:\\cloudflare_projects\\crucible",
+      "icon": "🔥",
+      "command": "claude --dangerously-skip-permissions",
+      "intro": {
+        "title": "Claude Code — Crucible",
+        "lines": [
+          "This launches an interactive Claude Code session inside the Crucible project folder (C:\\cloudflare_projects\\crucible).",
+          "To make changes, just chat in plain English — for example: \"add a settings page\" or \"fix the bug where the form won't submit\". Claude Code reads the code, makes the edits, and can run and test the app for you.",
+          "It can create, edit, and delete files and run commands in this folder, so review its proposed changes as you go.",
+          "Click OK to drop straight into Claude Code."
+        ]
+      }
+    }
   ]
 }

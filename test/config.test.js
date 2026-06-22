@@ -45,6 +45,14 @@ test('passes through optional command and omits it when absent', () => {
   assert.ok(!('command' in tiles[1]));
 });
 
+test('passes through optional intro object', () => {
+  const intro = { title: 'Hi', lines: ['one', 'two'] };
+  const p = tmpConfig({ tiles: [{ path: 'C:\\a', intro }, { path: 'C:\\b' }] });
+  const tiles = loadTiles(p);
+  assert.deepEqual(tiles[0].intro, intro);
+  assert.ok(!('intro' in tiles[1]));
+});
+
 test('cleanup temp directories', () => {
   for (const dir of createdDirs) {
     rmSync(dir, { recursive: true, force: true });
