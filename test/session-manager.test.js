@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { createSessionManager } from '../src/session-manager.js';
 
 // Deterministic fake clock: timers fire when advance() passes their due time.
@@ -136,5 +137,16 @@ test('records command lines from input and buffer is capped', () => {
   const ws2 = fakeWs();
   m.start('a@x', ws2, { tilePath: 'C:\\x' });
   const restore = ws2.sent.find((msg) => msg.type === 'restore');
-  assert.ok(restore.data.length <= 10);                  // oldest evicted, not unbounded
+  assert.ok(Buffer.byteLength(restore.data, 'utf8') <= 8);   // cap honored even for a single big chunk
+});
+
+test('detach from an already-taken-over socket does not kill the new session', () => {
+  const { m, clock, ptys } = mgr();
+  const ws1 = fakeWs(), ws2 = fakeWs();
+  m.start('a@x', ws1, { tilePath: 'C:\\x' });
+  m.start('a@x', ws2, { tilePath: 'C:\\x' });   // ws2 takes over
+  m.detach('a@x', ws1);                          // stale close from old socket
+  clock.advance(600000);                         // grace window
+  assert.equal(ptys[0].killed, false);           // session still alive
+  assert.ok(m.get('a@x'));
 });

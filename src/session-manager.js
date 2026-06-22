@@ -15,12 +15,19 @@ export function createSessionManager({
     while (s.bufferLen > bufferBytes && s.buffer.length > 1) {
       s.bufferLen -= Buffer.byteLength(s.buffer.shift(), 'utf8');
     }
+    if (s.bufferLen > bufferBytes && s.buffer.length === 1) {
+      let chunk = s.buffer[0];
+      if (chunk.length > bufferBytes) chunk = chunk.slice(chunk.length - bufferBytes); // coarse char cut
+      while (Buffer.byteLength(chunk, 'utf8') > bufferBytes && chunk.length > 0) chunk = chunk.slice(1);
+      s.buffer[0] = chunk; s.bufferLen = Buffer.byteLength(chunk, 'utf8');
+    }
   }
   function clearTimers(s) {
     clearTimer(s.idleTimer); clearTimer(s.warnTimer); clearTimer(s.graceTimer);
     s.idleTimer = s.warnTimer = s.graceTimer = null;
   }
   function armIdle(s) {
+    clearTimer(s.graceTimer); s.graceTimer = null;
     clearTimer(s.idleTimer); clearTimer(s.warnTimer);
     s.warnTimer = setTimer(() => { s.idleWarned = true; send(s.ws, { type: 'idle-warning', seconds: Math.round(warnMs / 1000) }); }, idleMs - warnMs);
     s.idleTimer = setTimer(() => kill(s.identity, 'idle'), idleMs);
