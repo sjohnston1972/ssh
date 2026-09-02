@@ -15,7 +15,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # `npm test` runs `node --test test/*.test.js` and relies on the
+          # test runner's built-in glob expansion of that pattern (the
+          # default Windows shells, cmd.exe/pwsh, do not expand `*`
+          # themselves the way bash does). That glob support isn't present
+          # in Node 20, so a current LTS that has it is required here.
+          node-version: 24
           cache: npm
 
       - run: npm ci
