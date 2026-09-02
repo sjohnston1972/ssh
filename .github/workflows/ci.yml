@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # node-pty is a native module and the app targets Windows shells
+    # (powershell.exe / cmd.exe), so the suite runs on windows-latest.
+    # See issue #8 for why this is Windows-only for now.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
