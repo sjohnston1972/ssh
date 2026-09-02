@@ -1,8 +1,14 @@
 import { Buffer } from 'node:buffer';
 
+// Strips ANSI/terminal escape sequences (CSI, OSC, charset-select, single-char ESC)
+// from PTY output so echo-matching below compares against the actual printable text.
+const ESC_RE = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[PX^_][\s\S]*?\x1b\\|\x1b[()#][0-9A-Za-z]|\x1b./g;
+function stripAnsi(str) { return str.replace(ESC_RE, ''); }
+
 export function createSessionManager({
   spawn, audit,
   idleMs = 900000, warnMs = 60000, graceMs = 600000, commandDelayMs = 500, bufferBytes = 262144,
+  echoWindowMs = 300,
   setTimer = setTimeout, clearTimer = clearTimeout,
 }) {
   const sessions = new Map(); // identity -> session
@@ -23,8 +29,8 @@ export function createSessionManager({
     }
   }
   function clearTimers(s) {
-    clearTimer(s.idleTimer); clearTimer(s.warnTimer); clearTimer(s.graceTimer);
-    s.idleTimer = s.warnTimer = s.graceTimer = null;
+    clearTimer(s.idleTimer); clearTimer(s.warnTimer); clearTimer(s.graceTimer); clearTimer(s.echoTimer);
+    s.idleTimer = s.warnTimer = s.graceTimer = s.echoTimer = null;
   }
   function armIdle(s) {
     clearTimer(s.graceTimer); s.graceTimer = null;
@@ -44,11 +50,59 @@ export function createSessionManager({
     audit.event('session_stop', { email: identity, reason });
   }
   function bindTerm(s) {
-    s.term.onData((d) => { appendBuffer(s, d); send(s.ws, { type: 'data', data: d }); });
+    s.term.onData((d) => { consumeEcho(s, d); appendBuffer(s, d); send(s.ws, { type: 'data', data: d }); });
     s.term.onExit(() => {
       send(s.ws, { type: 'exit' });
       if (sessions.get(s.identity) === s) { clearTimers(s); sessions.delete(s.identity); audit.event('session_stop', { email: s.identity, reason: 'exited' }); }
     });
+  }
+
+  // --- Interactive-line audit, gated on the PTY actually echoing what was typed ---
+  //
+  // Secrets typed at a non-echoing prompt (sudo/ssh/su/runas/etc.) must never reach the
+  // audit log. Rather than pattern-matching known "Password:" prompt strings (fragile,
+  // easy to bypass with an unrecognized prompt, and still requires briefly holding the
+  // secret to do the matching), we watch the actual terminal echo state: a real
+  // interactive terminal (PTY on POSIX, ConPTY on Windows) echoes typed characters back
+  // through its output stream only while local echo is enabled; the foreground program
+  // disables echo itself while reading a secret. So each typed character is held as
+  // "pending" until the PTY's own output confirms it was echoed back (matched, in order,
+  // against de-ANSI'd output). Only confirmed-echoed characters are ever appended to the
+  // line buffer that gets audited. If a character isn't echoed back within `echoWindowMs`,
+  // the whole line is flagged hidden: nothing typed on it is ever logged, and only a
+  // content-free `command_redacted` marker is recorded so the audit trail still shows that
+  // *something* was typed, without capturing what.
+  function armEchoTimer(s) {
+    clearTimer(s.echoTimer);
+    s.echoTimer = setTimer(() => {
+      s.echoTimer = null;
+      if (s.pending) { s.lineHidden = true; s.pending = ''; }
+      if (s.pendingEnter) finalizeLine(s);
+    }, echoWindowMs);
+  }
+  function consumeEcho(s, output) {
+    if (!s.pending) return;
+    const clean = stripAnsi(output);
+    let i = 0;
+    while (i < s.pending.length && i < clean.length && s.pending[i] === clean[i]) i++;
+    if (i > 0) { s.lineBuf += s.pending.slice(0, i); s.pending = s.pending.slice(i); }
+    if (!s.pending) {
+      clearTimer(s.echoTimer); s.echoTimer = null;
+      if (s.pendingEnter) finalizeLine(s);
+    } else if (i > 0) {
+      armEchoTimer(s); // made progress: give the remainder a fresh window
+    }
+  }
+  function finalizeLine(s) {
+    clearTimer(s.echoTimer); s.echoTimer = null;
+    if (s.lineHidden) {
+      // Something was typed while the terminal's echo was off (a password/secret prompt).
+      // Never write the captured characters, only that redaction happened.
+      audit.event('command_redacted', { email: s.identity });
+    } else if (s.lineBuf.trim()) {
+      audit.command(s.identity, s.lineBuf);
+    }
+    s.lineBuf = ''; s.pending = ''; s.lineHidden = false; s.pendingEnter = false;
   }
 
   function start(identity, ws, opts = {}) {
@@ -67,7 +121,10 @@ export function createSessionManager({
       return existing;
     }
     const term = spawn({ cwd: opts.tilePath, cols: opts.cols || 120, rows: opts.rows || 30, shell: opts.shell });
-    const s = { identity, ws, term, buffer: [], bufferLen: 0, lineBuf: '', idleWarned: false, idleTimer: null, warnTimer: null, graceTimer: null };
+    const s = {
+      identity, ws, term, buffer: [], bufferLen: 0, idleWarned: false, idleTimer: null, warnTimer: null, graceTimer: null,
+      lineBuf: '', pending: '', lineHidden: false, pendingEnter: false, echoTimer: null,
+    };
     sessions.set(identity, s);
     bindTerm(s);
     audit.event('session_start', { email: identity, path: opts.tilePath });
@@ -86,9 +143,16 @@ export function createSessionManager({
     const s = sessions.get(identity); if (!s) return;
     noteActivity(s);
     for (const ch of data) {
-      if (ch === '\r' || ch === '\n') { if (s.lineBuf.trim()) audit.command(identity, s.lineBuf); s.lineBuf = ''; }
-      else if (ch === '\x7f') { s.lineBuf = s.lineBuf.slice(0, -1); }
-      else { s.lineBuf += ch; }
+      if (ch === '\r' || ch === '\n') {
+        if (s.pending) { s.pendingEnter = true; armEchoTimer(s); } // wait for trailing echo (or timeout) before deciding
+        else finalizeLine(s);
+      } else if (ch === '\x7f' || ch === '\x08') {
+        if (s.pending) s.pending = s.pending.slice(0, -1);
+        else s.lineBuf = s.lineBuf.slice(0, -1);
+      } else {
+        s.pending += ch;
+        armEchoTimer(s);
+      }
     }
     try { s.term.write(data); } catch {}
   }

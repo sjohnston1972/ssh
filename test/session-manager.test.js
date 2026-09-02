@@ -126,18 +126,62 @@ test('two identities get independent sessions', () => {
   assert.ok(!wsb.sent.find((msg) => msg.data === 'AAA'));
 });
 
-test('records command lines from input and buffer is capped', () => {
-  const { m, audit, ptys } = mgr({ bufferBytes: 8 });
+test('buffer is capped even for a single big chunk', () => {
+  const { m, ptys } = mgr({ bufferBytes: 8 });
   const ws = fakeWs();
   m.start('a@x', ws, { tilePath: 'C:\\x' });
-  m.input('a@x', 'dir\r');
-  assert.ok(audit.commands.find((c) => c.line === 'dir'));
   ptys[0].emitData('0123456789');                        // 10 bytes > cap 8
   m.detach('a@x', ws);
   const ws2 = fakeWs();
   m.start('a@x', ws2, { tilePath: 'C:\\x' });
   const restore = ws2.sent.find((msg) => msg.type === 'restore');
   assert.ok(Buffer.byteLength(restore.data, 'utf8') <= 8);   // cap honored even for a single big chunk
+});
+
+// --- #2: typed lines are only audited once the PTY actually echoes them back ---
+
+test('a typed line the pty echoes back (normal interactive typing) is still audited', () => {
+  const { m, audit, ptys } = mgr();
+  const ws = fakeWs();
+  m.start('a@x', ws, { tilePath: 'C:\\x' });
+  for (const ch of 'dir') { m.input('a@x', ch); ptys[0].emitData(ch); } // pty echoes each keystroke, as a real terminal does
+  m.input('a@x', '\r');
+  assert.ok(audit.commands.find((c) => c.line === 'dir'));
+  assert.equal(audit.events.some((e) => e.type === 'command_redacted'), false);
+});
+
+test('input typed while the pty does not echo it back (hidden/password prompt) is never logged', () => {
+  const { m, audit, clock } = mgr({ echoWindowMs: 300 });
+  const ws = fakeWs();
+  m.start('a@x', ws, { tilePath: 'C:\\x' });
+  m.input('a@x', 'secret123');           // no emitData: pty has echo disabled, e.g. a password prompt
+  clock.advance(300);                    // echo window expires with the chars still unconfirmed
+  m.input('a@x', '\r');
+  assert.equal(audit.commands.length, 0);                       // no command event was written at all
+  assert.ok(audit.events.find((e) => e.type === 'command_redacted' && e.email === 'a@x'));
+});
+
+test('a visible command followed by a hidden-prompt line: the command is audited, the secret never leaks', () => {
+  const { m, audit, clock, ptys } = mgr({ echoWindowMs: 300 });
+  const ws = fakeWs();
+  m.start('a@x', ws, { tilePath: 'C:\\x' });
+  for (const ch of 'sudo ls') { m.input('a@x', ch); ptys[0].emitData(ch); }
+  m.input('a@x', '\r'); ptys[0].emitData('\r\n');
+  // shell now shows a non-echoing "Password:" prompt; the reply is never echoed back
+  m.input('a@x', 'hunter2');
+  clock.advance(300);
+  m.input('a@x', '\r');
+  assert.ok(audit.commands.find((c) => c.line === 'sudo ls'));
+  const everything = JSON.stringify(audit.commands) + JSON.stringify(audit.events);
+  assert.ok(!everything.includes('hunter2'), 'the secret must never appear anywhere in the audit stream');
+});
+
+test('the explicit tile auto-run command is still audited (unaffected by echo gating)', () => {
+  const { m, clock, audit, ptys } = mgr();
+  m.start('a@x', fakeWs(), { tilePath: 'C:\\x', command: 'claude --x' });
+  clock.advance(500);
+  assert.ok(ptys[0].written.includes('claude --x\r'));
+  assert.ok(audit.commands.find((c) => c.line === 'claude --x'));
 });
 
 test('detach from an already-taken-over socket does not kill the new session', () => {
