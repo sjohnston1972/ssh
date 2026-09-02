@@ -9,7 +9,7 @@ import { spawnCmd } from './pty-session.js';
 import { createAuditLogger, readRecentAudit, pruneOldLogs } from './audit.js';
 import { createSessionManager } from './session-manager.js';
 import { visibleTiles, tileAllowed } from './authz.js';
-import { resolveTileDir, safeChildPath } from './files.js';
+import { resolveTileSubdir, safeChildPath } from './files.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dir, '..');
@@ -64,7 +64,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       return res.end(JSON.stringify(readRecentAudit(logsDir, Number(url.searchParams.get('limit')) || 500)));
     }
     if (url.pathname === '/api/files') {
-      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      const dir = resolveTileSubdir(tiles, url.searchParams.get('path'), url.searchParams.get('subpath'), identity);
       if (!dir) { res.writeHead(403); return res.end('forbidden'); }
       let entries = [];
       try {
@@ -77,7 +77,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       return res.end(JSON.stringify(entries));
     }
     if (url.pathname === '/api/download') {
-      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      const dir = resolveTileSubdir(tiles, url.searchParams.get('path'), url.searchParams.get('subpath'), identity);
       if (!dir) { res.writeHead(403); return res.end('forbidden'); }
       const target = safeChildPath(dir, url.searchParams.get('file'));
       if (!target || !existsSync(target) || statSync(target).isDirectory()) { res.writeHead(404); return res.end('not found'); }
@@ -86,7 +86,7 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       return createReadStream(target).on('error', () => { try { res.destroy(); } catch {} }).pipe(res);
     }
     if (url.pathname === '/api/upload' && req.method === 'PUT') {
-      const dir = resolveTileDir(tiles, url.searchParams.get('path'), identity);
+      const dir = resolveTileSubdir(tiles, url.searchParams.get('path'), url.searchParams.get('subpath'), identity);
       if (!dir) { res.writeHead(403); return res.end('forbidden'); }
       const target = safeChildPath(dir, url.searchParams.get('name'));
       if (!target) { res.writeHead(400); return res.end('bad name'); }

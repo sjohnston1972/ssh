@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from '../src/server.js';
@@ -157,6 +157,47 @@ test('download with traversal name is contained (not found)', async () => {
   const r = await fetch(`http://127.0.0.1:${port}/api/download?path=${encodeURIComponent(dir)}&file=${encodeURIComponent('..\\\\..\\\\secret')}`, { headers: { 'cf-access-jwt-assertion': 'a@x' } });
   assert.ok(r.status === 404 || r.status === 400);
   await close();
+});
+
+test('#9: /api/files lists a real subdirectory inside a tile via subpath', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile-sub-'));
+  mkdirSync(join(dir, 'proj'));
+  writeFileSync(join(dir, 'proj', 'a.txt'), 'A');
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  try {
+    const h = { 'cf-access-jwt-assertion': 'a@x' };
+    const list = await (await fetch(`http://127.0.0.1:${port}/api/files?path=${encodeURIComponent(dir)}&subpath=proj`, { headers: h })).json();
+    assert.ok(list.find((e) => e.name === 'a.txt'));
+  } finally { await close(); }
+});
+
+test('#9: /api/files subpath traversal (../..) is contained (403), never lists outside the tile', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile-sub2-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  try {
+    const h = { 'cf-access-jwt-assertion': 'a@x' };
+    const r = await fetch(`http://127.0.0.1:${port}/api/files?path=${encodeURIComponent(dir)}&subpath=${encodeURIComponent('..\\..')}`, { headers: h });
+    assert.equal(r.status, 403);
+    const r2 = await fetch(`http://127.0.0.1:${port}/api/files?path=${encodeURIComponent(dir)}&subpath=${encodeURIComponent('C:\\Windows\\System32')}`, { headers: h });
+    assert.equal(r2.status, 403);
+  } finally { await close(); }
+});
+
+test('#9: upload/download work inside a navigated subdirectory', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile-sub3-'));
+  mkdirSync(join(dir, 'proj'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  try {
+    const h = { 'cf-access-jwt-assertion': 'a@x' };
+    const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&subpath=proj&name=sub.txt`, { method: 'PUT', headers: h, body: 'INSIDE-SUBDIR' });
+    assert.equal(up.status, 200);
+    assert.ok(existsSync(join(dir, 'proj', 'sub.txt')));
+    const dl = await fetch(`http://127.0.0.1:${port}/api/download?path=${encodeURIComponent(dir)}&subpath=proj&file=sub.txt`, { headers: h });
+    assert.equal(await dl.text(), 'INSIDE-SUBDIR');
+  } finally { await close(); }
 });
 
 test('/api/audit returns a JSON array', async () => {
