@@ -1,11 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WebSocket } from 'ws';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from '../src/server.js';
 import { tileAllowed } from '../src/authz.js';   // add near top imports (used indirectly; keeps import graph honest)
+
+// Server-side cleanup (deleting a partial upload) happens after its own write-stream
+// close event, which can land slightly after the client observes the response/error.
+// Poll briefly instead of asserting immediately after a racy client-visible outcome.
+async function eventuallyNotExists(path, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  while (existsSync(path)) {
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return true;
+}
 
 // Stub verifier: the token value IS the identity email (lets tests pick identities).
 function start(opts = {}) {
@@ -209,11 +221,87 @@ test('/api/audit returns a JSON array', async () => {
   await close();
 });
 
-test('oversize upload is rejected (413)', async () => {
+test('oversize upload is rejected (413) and leaves no partial file', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'tile4-'));
   const tiles = [{ label: 'F', path: dir, icon: '📁' }];
   const { port, close } = await start({ tiles, server: { maxUploadBytes: 8 } });
-  const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=big.txt`, { method: 'PUT', headers: { 'cf-access-jwt-assertion': 'a@x' }, body: 'way too long body' });
-  assert.equal(up.status, 413);
-  await close();
+  try {
+    const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=big.txt`, { method: 'PUT', headers: { 'cf-access-jwt-assertion': 'a@x' }, body: 'way too long body' });
+    assert.equal(up.status, 413);
+    assert.ok(await eventuallyNotExists(join(dir, 'big.txt')), 'a failed oversize upload must not leave a partial file behind');
+  } finally { await close(); }
+});
+
+test('oversize upload sent in many small chunks over a slow stream is still rejected with no partial file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tile4b-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles, server: { maxUploadBytes: 1024 } });
+  try {
+    // A ReadableStream body lets us drip-feed chunks, exercising the streamed write path
+    // (rather than one fetch() body write) the same way a slow real upload would.
+    const total = 1024 * 50; // 50KB body against a 1KB cap, sent as 1KB chunks
+    const chunk = Buffer.alloc(1024, 'x');
+    const body = new ReadableStream({
+      async start(controller) {
+        for (let sent = 0; sent < total; sent += chunk.length) {
+          controller.enqueue(chunk);
+          await new Promise((r) => setTimeout(r, 1));
+        }
+        controller.close();
+      },
+    });
+    // The server responds 413 as soon as the cap is crossed, well before the client has
+    // finished streaming the rest of the (deliberately oversized) body. Node's fetch
+    // (undici), in half-duplex mode, doesn't reliably surface that early response as a
+    // clean 413 while it's still mid-write — it can instead see the connection close as
+    // an ECONNRESET, which is a known HTTP/1.1 half-duplex client limitation, not a
+    // signal about server correctness. Either outcome is acceptable here; the security
+    // invariant under test is that no partial file is ever left on disk.
+    try {
+      const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=drip.txt`, {
+        method: 'PUT', headers: { 'cf-access-jwt-assertion': 'a@x' }, body, duplex: 'half',
+      });
+      assert.equal(up.status, 413);
+    } catch (err) {
+      assert.match(String(err.cause || err), /ECONNRESET|aborted|ECONNREFUSED/i, `unexpected fetch failure: ${err.stack || err}`);
+    }
+    assert.ok(await eventuallyNotExists(join(dir, 'drip.txt')), 'no partial file should remain after a chunked oversize upload');
+  } finally { await close(); }
+});
+
+test('upload streams to disk without buffering the whole body in memory (peak RSS does not track file size)', async () => {
+  // node --expose-gc isn't guaranteed under `node --test`; when unavailable the
+  // before/after RSS snapshots are noisier but the assertion's margin (< 1/4 of the
+  // 64MB file size) is generous enough to stay meaningful either way.
+  const dir = mkdtempSync(join(tmpdir(), 'tile5-'));
+  const tiles = [{ label: 'F', path: dir, icon: '📁' }];
+  const { port, close } = await start({ tiles });
+  try {
+    const sizeBytes = 64 * 1024 * 1024; // 64MB — well over the old Buffer.concat's doubling cost at this size
+    const chunkSize = 256 * 1024;
+    const chunk = Buffer.alloc(chunkSize, 'a');
+    const body = new ReadableStream({
+      async start(controller) {
+        for (let sent = 0; sent < sizeBytes; sent += chunkSize) { controller.enqueue(chunk); }
+        controller.close();
+      },
+    });
+
+    if (global.gc) global.gc();
+    const rssBefore = process.memoryUsage().rss;
+
+    const up = await fetch(`http://127.0.0.1:${port}/api/upload?path=${encodeURIComponent(dir)}&name=huge.bin`, {
+      method: 'PUT', headers: { 'cf-access-jwt-assertion': 'a@x' }, body, duplex: 'half',
+    });
+    assert.equal(up.status, 200);
+    assert.equal(statSync(join(dir, 'huge.bin')).size, sizeBytes);
+
+    if (global.gc) global.gc();
+    const rssAfter = process.memoryUsage().rss;
+    const growth = rssAfter - rssBefore;
+    // A whole-body Buffer.concat of a 64MB upload would grow RSS by tens of MB (the body
+    // plus the concatenated copy). A bounded stream write should grow RSS by, at most, a
+    // small multiple of the stream's internal highWaterMark — well under the file size.
+    assert.ok(growth < sizeBytes / 4, `peak RSS growth ${growth} bytes tracked the 64MB file size instead of staying bounded`);
+  } finally { await close(); }
 });

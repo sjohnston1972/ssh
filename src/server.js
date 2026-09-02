@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { readFileSync, existsSync, statSync, readdirSync, writeFileSync, createReadStream } from 'node:fs';
+import { readFileSync, existsSync, statSync, readdirSync, createReadStream, createWriteStream, rmSync } from 'node:fs';
 import { join, extname, dirname, resolve, relative, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
@@ -90,21 +90,66 @@ export function createServer({ tiles, verifier, audit, fallbackDir, idleMinutes,
       if (!dir) { res.writeHead(403); return res.end('forbidden'); }
       const target = safeChildPath(dir, url.searchParams.get('name'));
       if (!target) { res.writeHead(400); return res.end('bad name'); }
-      const chunks = []; let size = 0; let aborted = false;
-      req.on('data', (c) => {
-        if (aborted) return;
-        size += c.length;
-        if (size > maxUploadBytes) { aborted = true; res.writeHead(413); res.end('too large'); req.destroy(); return; }
-        chunks.push(c);
+      // Stream straight to disk instead of buffering the whole body in memory: the size
+      // guard below runs per-chunk (before the chunk is written), and out.write()'s
+      // backpressure return value gates when we resume reading more from the request, so
+      // memory use stays bounded by the stream's highWaterMark regardless of file size.
+      const out = createWriteStream(target);
+      let size = 0; let aborted = false; let failStatus = 0; let failMessage = '';
+
+      function cleanupPartial() { try { rmSync(target); } catch {} }
+      // Wait for the write stream to actually close (its fd released) before responding
+      // or removing the file: on Windows an open handle can make rmSync fail with EBUSY,
+      // and responding earlier would let the client observe the 413/500 before the
+      // partial file is actually gone — a race the "no partial file left behind"
+      // guarantee depends on not losing.
+      out.on('close', () => {
+        if (!aborted) return;
+        cleanupPartial();
+        if (!res.headersSent) {
+          // The client (e.g. mid-upload, still streaming) may not have finished sending
+          // its body yet. Respond and let the connection close after the response
+          // flushes instead of forcibly destroying the socket — destroying it while the
+          // client is still writing surfaces as an ECONNRESET on the client side instead
+          // of the 413/500 it should see.
+          res.setHeader('connection', 'close');
+          res.writeHead(failStatus);
+          res.end(failMessage);
+        }
       });
+
+      function fail(status, message) {
+        if (aborted) return;
+        aborted = true;
+        failStatus = status; failMessage = message;
+        try { out.destroy(); } catch {}
+        // Make sure the request keeps draining (in case it was paused for backpressure)
+        // so a still-streaming client doesn't hit an OS-level reset from unread data
+        // sitting in the socket buffer when the connection closes after our response.
+        try { req.resume(); } catch {}
+      }
+
+      out.on('error', () => fail(500, 'write failed'));
+      req.on('error', () => fail(500, 'write failed'));
+
+      req.on('data', (chunk) => {
+        if (aborted) return; // still draining the socket, but no longer writing to disk
+        size += chunk.length;
+        if (size > maxUploadBytes) { fail(413, 'too large'); return; }
+        if (!out.write(chunk)) {
+          req.pause();
+          out.once('drain', () => { if (!aborted) req.resume(); });
+        }
+      });
+
       req.on('end', () => {
         if (aborted) return;
-        try {
-          writeFileSync(target, Buffer.concat(chunks));
+        out.end(() => {
+          if (aborted) return;
           audit.event('file_upload', { email: identity, path: dir, name: basename(target), size });
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ ok: true, name: basename(target), size }));
-        } catch { res.writeHead(500); res.end('write failed'); }
+        });
       });
       return;
     }
