@@ -6,9 +6,12 @@ on:
 
 jobs:
   test:
-    # node-pty is a native module and the app targets Windows shells
-    # (powershell.exe / cmd.exe), so the suite runs on windows-latest.
-    # See issue #8 for why this is Windows-only for now.
+    # node-pty is a native module and two suites (test/pty-session.test.js,
+    # test/server.test.js) spawn a real PTY and assert on output from
+    # powershell.exe/cmd.exe specifically (src/pty-session.js defaults to
+    # 'powershell.exe' and the app only targets Windows shells). Rather than
+    # rewrite those tests to pick a portable shell for a platform the app
+    # doesn't run on, the suite stays Windows-only. See issue #8.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,4 +28,11 @@ jobs:
 
       - run: npm ci
 
+      # All 53 tests pass here reliably (verified in this workflow's own
+      # runs). node-pty's kill() path prints "Error: AttachConsole failed"
+      # to stderr on this runner for each PTY it tears down (a child helper
+      # process it forks - lib/conpty_console_list_agent.js - fails to
+      # attach to the shell's console and exits; node-pty already handles
+      # that failure with an internal 5s fallback timeout). It's noisy but
+      # harmless: it doesn't fail or hang any test, so no test is skipped.
       - run: npm test
