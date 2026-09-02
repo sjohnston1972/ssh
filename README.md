@@ -23,10 +23,18 @@ in that directory, and there's a separate audit log viewer.
   - A disconnected session is kept alive for a grace period so a dropped
     connection can reattach without losing the shell.
   - A Files panel (`GET /api/files`, `PUT /api/upload`, `GET /api/download`)
-    lists, uploads to, and downloads from the tile's directory.
+    lists, uploads to, and downloads from the tile's directory. All three
+    accept an optional `subpath` parameter for folder navigation; the panel
+    shows a breadcrumb and descends into directories. `subpath` is resolved
+    server-side and checked for containment both lexically and against the
+    real filesystem path, so traversal (`..`), absolute or cross-drive paths,
+    UNC paths, and symlink/junction escapes are all rejected.
 - **Audit viewer** (`/audit`) — reads `GET /api/audit`, which serves recent
   entries from the append-only audit log (session start/stop, commands
   typed, file uploads/downloads, denied access attempts), newest first.
+  Input typed at a prompt that the terminal does not echo back — a password,
+  an enable secret — is never written to the log; the entry is recorded as
+  `command_redacted` with no content.
 - **Access control** — every HTTP request and WebSocket upgrade must carry a
   valid Cloudflare Access JWT (`Cf-Access-Jwt-Assertion` header or cookie),
   verified against your Access team's JWKS with the expected issuer and
